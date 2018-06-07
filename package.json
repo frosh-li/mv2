@@ -8,7 +8,9 @@
     "egg-mysql": "^3.0.0",
     "egg-scripts": "^2.5.0",
     "egg-sequelize": "^3.1.4",
-    "mysql2": "^1.5.3"
+    "mysql2": "^1.5.3",
+    "request": "^2.87.0",
+    "request-promise-native": "^1.0.5"
   },
   "devDependencies": {
     "autod": "^3.0.1",
@@ -26,9 +28,9 @@
   "scripts": {
     "start": "egg-scripts start --daemon --title=egg-server-cmaotai --workers=4 --env=dev",
     "stop": "egg-scripts stop --title=egg-server-cmaotai",
-    "dev": "egg-bin dev --cluster=4",
+    "dev": "egg-bin dev --cluster=10 --sticky=true",
     "debug": "egg-bin debug",
-    "test": "npm run lint -- --fix && npm run test-local",
+    "test": "npm run test-local",
     "test-local": "egg-bin test",
     "cov": "egg-bin cov",
     "lint": "eslint .",

@@ -28,3 +28,7 @@ exports.sequelize = {
   username: 'root',
   password: '123456',
 };
+
+exports.watcher = {
+    type: 'development',
+};

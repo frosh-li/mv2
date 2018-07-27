@@ -3,34 +3,75 @@
  * @type {[type]}
  */
 const Service = require('egg').Service;
-const request = require('request-promise-native');
+// 代理服务器
+   const proxyHost = "http-dyn.abuyun.com";
+   const proxyPort = 9020;
+
+   // 代理隧道验证信息 H102535F767T765D:1E911CA4F2DE03EE
+   const proxyUser = "H102535F767T765D";
+   const proxyPass = "1E911CA4F2DE03EE";
+
+let request = require('request-promise-native');
+
 const crypto = require('crypto');
 
 class GrabService extends Service {
-  async login(tel, pass, userAgent) {
-    userAgent = userAgent || this.userAgent(tel);
+  constructor(options) {
+    super(options);
+    this.memberid="";
+    this.auth = "";
+  }
+
+  submitUrl() {
+    return 'https://www.emaotai.cn/cmaotai-application-ysdt/api/v1/qd/order/submitQdOrder';
+  }
+
+  get memberUrl(){
+    return `https://www.emaotai.cn/yundt-application-trade-core/api/v1/yundt/trade/member/detail/get?`;
+  }
+  async login(account) {
+    let tel = account.phone;
+    let pass = account.password;
     const now = +new Date();
     const options = {
-      method: 'POST',
-      url: 'https://www.cmaotai.com/API/Servers.ashx',
-      headers: this.headers(userAgent),
-      form: {
-        action: 'UserManager.login',
-        tel,
-        pwd: pass,
-        timestamp121: now,
+      url: 'https://www.emaotai.cn/huieryun-identity/api/v1/auth/XIANGLONG/user/o2omember/auth',
+      method: 'post',
+      headers: this.headers,
+      form:{
+          userCode: tel,
+          userPassword: this.rstr2b64(pass),
+          loginType: 'name',
+          loginSource: 2,
+          loginFlag: 1,
       },
-      json: true,
-      jar: true,
+      gzip:true,
+      json:true,
       timeout: 5000,
+      proxy: "http://" + proxyUser + ":" + proxyPass + "@" + proxyHost + ":" + proxyPort,
     };
     const res = await request(options);
     console.log(res);
-    if (res.state === true && res.code === 0) {
-        		return res;
-    } else if (res.state === true && res.msg === '密码错误') {
+
+    if (res.resultCode === 0) {
+        this.auth = res.data.auth || "";
+        if(!account.memberid){
+          let userdata = await this.userInfo();
+          this.memberid = userdata.data.memberId;
+          await this.ctx.model.Account.update({
+            memberid: this.memberid
+          },{
+            where: {
+              phone: tel,
+            }
+          })
+        }else{
+          this.memberid = account.memberid;
+        }
+
+        return res;
+    } else if(res.resultCode === 10010) {
         	// 更新数据为密码错误
-        	await this.ctx.model.Account.update({
+        await this.ctx.model.Account.update({
         			status: 3,
         	}, {
         where: {
@@ -39,7 +80,7 @@ class GrabService extends Service {
       });
       throw new Error(`${tel}:${pass}:账号密码错误`);
     } else {
-        	throw new Error(`${tel}:${pass}:未知错误:${res.msg}`);
+      throw new Error(`${tel}:${pass}:未知错误:${res.msg}`);
     }
 
   }
@@ -68,6 +109,7 @@ class GrabService extends Service {
       },
       json: true,
       timeout: 5000,
+      proxy: "http://" + proxyUser + ":" + proxyPass + "@" + proxyHost + ":" + proxyPort,
     };
     console.log('登记登陆', account.phone);
     const res = await request(options);
@@ -77,224 +119,149 @@ class GrabService extends Service {
 
   async grabStatus(account) {
     const now = +new Date();
-    const userAgent = this.userAgent(account.phone);
 
     const options = {
-      method: 'POST',
+      method: 'get',
       jar: true,
-      url: 'https://www.cmaotai.com/API/Servers.ashx',
-      headers: {
-        'cache-control': 'no-cache',
-        'accept-language': 'zh-CN,en-US;q=0.8',
-        accept: 'application/json, text/javascript, */*; q=0.01',
-        'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
-        Connection: 'keep-alive',
-        referer: 'https://www.cmaotai.com/ysh5/page/GrabSingle/grabSingleOrderSubmit.html',
-        'user-agent': userAgent,
-        'x-requested-with': 'XMLHttpRequest',
-      },
-      form: {
-        timestamp121:	now,
-        action: 'GrabSingleManager.getList',
-        index: 1,
-        status: -1,
-        size: 10,
-      },
+      url: `https://www.emaotai.cn/cmaotai-application-ysdt/api/v1/qd/order/getQdOrders?orderStatus=-2&pageNum=1&pageSize=10`,
+      headers: this.headers,
       json: true,
       timeout: 5000,
+      gzip:true,
+      proxy: "http://" + proxyUser + ":" + proxyPass + "@" + proxyHost + ":" + proxyPort,
     };
-      // console.log(options.form);
     console.log('获取订单状态', account.phone);
-    const res = await request(options);
-    // console.log(res);
-    if (res.state === false) {
-      	return new Promise((resolve, reject) => {
-      			return resolve([]);
-      	});
-    } else if (res.data && JSON.parse(res.data).data) {
-
-      	return new Promise((resolve, reject) => {
-      			const orderLists = JSON.parse(res.data).data.data;
-      			const ret = [];
-      			orderLists && orderLists.forEach(item => {
-      				const timer = new Date() - new Date(item.createTime) < 1000 * 60 * 60 * 10;
-      				if (item.orderStatus <= 5 && timer) {
-      						ret.push(item);
-      				}
-      			});
-      			return resolve(ret);
-      	});
+    const res = await Promise.all([
+      request(options),
+      request(Object.assign(options,{
+        url: `https://www.emaotai.cn/cmaotai-application-ysdt/api/v1/qd/order/getQdOrders?orderStatus=4&pageNum=1&pageSize=10`
+      }))
+    ]);
+    console.log(JSON.stringify(res,null,4));
+    if(res[1].data.list.length > 0){
+      console.log("has order");
     }
-      	return new Promise((resolve, reject) => {
-      			return resolve([]);
-      	});
+    if(res[0].data.list.length === 0 && res[1].data.list.length === 0){
+      // 重新开始登记一次
+      await this.submit();
+      return;
+    }
 
+    if(res[1].data.list.length > 0 || res[0].data.list.length > 0){
+      await this.ctx.service.account.updateGrab(account, res[0].data.list.concat(res[1].data.list));
+    }
   }
 
-  async getAddressId(tel) {
-    
-    console.log('start get addressID from mobile:', tel);
-    const now = +new Date();
-    const userAgent = this.userAgent(tel);
-    const options = {
-      method: 'POST',
-      jar: true,
-      url: 'https://www.cmaotai.com/YSApp_API/YSAppServer.ashx',
-      headers: {
-        'cache-control': 'no-cache',
-		            'accept-language': 'zh-CN,en-US;q=0.8',
-		            accept: 'application/json, text/javascript, */*; q=0.01',
-		            'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
-		            Connection: 'keep-alive',
-		            referer: 'https://www.cmaotai.com/ysh5/page/GrabSingle/grabSingleOrderSubmit.html',
-		            'user-agent': userAgent,
-		            'x-requested-with': 'XMLHttpRequest',
-      },
-      form: {
-        action: 'AddressManager.list',
-        index: '1',
-        size: '10',
-        timestamp121: now,
-      },
-      json: true,
-      timeout: 5000,
-    };
-
-    const res = await request(options);
-    console.log('address', res.data);
-    if (res.data && res.data.list && res.data.list.length > 0) {
-        	const sid = res.data.list[0].SId;
-          const currentAddress = res.data.list[0];
-          const {
-                UserId,
-                TelPhone,
-                Zipcode,
-                Address,
-                AddressInfo,
-                ShipTo,
-                Remark,
-                ProvinceId,
-                CityId,
-                DistrictsId,
-                SMNo,
-                RelPhone,
-                Longitude,
-                Latitude,
-                TimeStamp,
-              } = currentAddress;
-        	return new Promise((resolve, reject) => {
-            
-            this.ctx.model.Address.findOrCreate({
-              where: {
-                SId: sid,
-              },
-              defaults: {
-                UserId,
-                TelPhone,
-                Zipcode,
-                Address,
-                AddressInfo,
-                ShipTo,
-                Remark,
-                ProvinceId,
-                CityId,
-                DistrictsId,
-                SMNo,
-                RelPhone,
-                Longitude,
-                Latitude,
-                TimeStamp,
-              }
-            }).then(() => {
-                return resolve(sid);  
-            }).catch(e=>{
-                console.log(e);
-                return resolve(sid);
-            })
-      			
-      		});
-
-    }
-        	return new Promise((resolve, reject) => {
-      			return resolve(-1);
-      		});
-
-  }
-
-  async GrabSubmit(account) {
-    const now = +new Date();
-    const userAgent = this.userAgent(account.phone);
-    const addressId = await this.getAddressId(account.phone);
-    console.log('addressID', addressId);
-    if (addressId === -1) {
-      	throw new Error('无法获取账号地址');
-      	return;
-    }
-    const options = {
-      method: 'POST',
-      jar: true,
-      url: 'https://www.cmaotai.com/API/Servers.ashx',
-      headers: {
-
-        'cache-control': 'no-cache',
-        'accept-language': 'zh-CN,en-US;q=0.8',
-        accept: 'application/json, text/javascript, */*; q=0.01',
-        'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
-        Connection: 'keep-alive',
-        referer: 'https://www.cmaotai.com/ysh5/page/GrabSingle/grabSingleOrderSubmit.html',
-        'user-agent': userAgent,
-        'x-requested-with': 'XMLHttpRequest',
-      },
-      form: {
-        sid:	addressId,
-        iid:	-1,
-        qty:	account.grabNumber || 6,
-        express:	14,
-        product:	'{"Pid":391,"PName":"贵州茅台酒 (新飞天) 53%vol 500ml","PCode":"23","Unit":"瓶","CoverImage":"/upload/fileStore/20180415/6365942315164224808933821.jpg","SalePrice":1499}',
-        remark: '',
-        action:	'GrabSingleManager.submit',
-        timestamp121:	now,
-      },
-      json: true,
-      timeout: 5000,
-    };
-      // console.log(options.form);
-    console.log('开始下单', account.phone, addressId);
-    const res = await request(options);
+  async getFirstAddressId() {
+    let res = await request({
+        url: 'https://www.emaotai.cn/yundt-application-trade-core/api/v1/yundt/trade/member/address/list?',
+        method: 'get',
+        headers: this.headers,
+        gzip:true,
+        json:true,
+        proxy: "http://" + proxyUser + ":" + proxyPass + "@" + proxyHost + ":" + proxyPort,
+    })
     return res;
   }
 
-  headers(userAgent, cookies = '') {
+  async sleep(timer=5000) {
+    return new Promise((resolve,reject) => {
+      setTimeout(()=>{
+        return resolve(true);
+      }, timer);
+    })
+  }
+
+  async submit(){
+    let address = await this.getFirstAddressId();
+    await this.sleep(500);
+    let addressId = address.data[0].id;
+    // 登记
+    let res = await request({
+        url: this.submitUrl(),
+        method: 'post',
+        headers: this.headers,
+        gzip:true,
+        form: {
+          addressId:addressId,
+          deliveryType:3,
+          goodsNum:2,
+          invoiceId:-1,
+          itemId:'1179926380333332484',
+          orderType:0,
+          remark:"",
+          skuId:'1179926380340672519'
+        },
+        json:true,
+        proxy: "http://" + proxyUser + ":" + proxyPass + "@" + proxyHost + ":" + proxyPort,
+    })
+    console.log(res);
+    return res;
+  }
+
+  async userInfo() {
+      let res = await request({
+          url: this.memberUrl,
+          method: 'get',
+          headers: this.headers,
+          gzip:true,
+          json: true,
+          proxy: "http://" + proxyUser + ":" + proxyPass + "@" + proxyHost + ":" + proxyPort,
+      })
+      console.log('userinfo', res)
+      return res;
+  }
+
+
+
+  rstr2b64(input)
+   {
+     let b64pad = '';
+     try { b64pad } catch(e) { b64pad=''; }
+     var tab = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+     var output = "";
+     var len = input.length;
+     for(var i = 0; i < len; i += 3)
+     {
+       var triplet = (input.charCodeAt(i) << 16)
+                   | (i + 1 < len ? input.charCodeAt(i+1) << 8 : 0)
+                   | (i + 2 < len ? input.charCodeAt(i+2)      : 0);
+       for(var j = 0; j < 4; j++)
+       {
+         if(i * 8 + j * 6 > input.length * 8) output += b64pad;
+         else output += tab.charAt((triplet >>> 6*(3-j)) & 0x3F);
+       }
+     }
+     return output;
+   }
+
+  get headers() {
+    const base64    = new Buffer("H102535F767T765D:1E911CA4F2DE03EE").toString("base64");
     return {
-      // // "proxy-authorization" : "Basic " + proxy.proxyAuth,
-      'cache-control': 'no-cache',
-      cookie: cookies,
-      'accept-language': 'zh-CN,en-US;q=0.8',
-      accept: 'application/json, text/javascript, */*; q=0.01',
-      'content-type': 'application/x-www-form-urlencoded',
-      referer: 'https://www.cmaotai.com/ysh5/page/LoginRegistr/userLogin.html',
-      'user-agent': userAgent,
-      'x-requested-with': 'XMLHttpRequest',
+      'Proxy-Authorization': "Basic " + base64,
+      'memberid': this.memberid,
+      'auth':this.auth || "",
+      'Accept': 'application/json, text/javascript, */*; q=0.01',
+      'Accept-Encoding': 'gzip, deflate, br',
+      'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+      'appId': 1,
       'Cache-Control': 'no-cache',
-    };
-  }
-  get signSecrit() {
-    return 'my secrit';
-  }
-
-  md5(str) {
-    const _md5 = crypto.createHash('md5');
-    const result = _md5.update(str).digest('hex');
-    return result.toLowerCase();
-  }
-
-  userAgent(mobile) {
-    const os = 'android';
-    const version = '1.0.23';
-    const appIndent = this.md5(mobile + this.signSecrit);
-    const signString = '7c60b232d79d34d727c12c6f33ad8fea29ebb333ae0c1b3822e5a18934c8f189';
-    const appIndentSign = this.md5([ os, version, appIndent, signString ].join('-'));
-    return `Mozilla/5.0 (Linux; Android 4.4.4; LA2-SN Build/KTU84P) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/33.0.0.0 Mobile Safari/537.36[${os}/${version}/${appIndent}/${appIndentSign}]`;
+      'tenantid': '02',
+      'channelId': '01',
+      'channelcode': '02',
+      'appcode':2,
+      'reqid':+new Date(),
+      'Connection': 'keep-alive',
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Flag': 1,
+      'Origin': 'https://www.emaotai.cn',
+      'Pragma': 'no-cache',
+      'Referer': 'https://www.emaotai.cn/smartsales-b2c-web-pc/login',
+      'Sign': 'd41d8cd98f00b204e9800998ecf8427e',
+      'tenantid': 1,
+      'Timestamp': +new Date(),
+      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/67.0.3396.87 Safari/537.36',
+    }
   }
 
 }

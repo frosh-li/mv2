@@ -29,32 +29,23 @@ module.exports = app => {
       try {
         const updated = new Date(data.updated_at);
         const now = new Date();
-        if (now - updated <= 1000 * 60 * 10) { // 10分钟内获取不再获取
-          app.logger.info('处理成功', data);
-          app.messenger.sendToAgent('DONE', process.pid);
-          return;
-        }
+        // if (now - updated <= 1000 * 60 * 10) { // 10分钟内获取不再获取
+        //   app.logger.info('处理成功', data);
+        //   app.messenger.sendToAgent('DONE', process.pid);
+        //   return;
+        // }
 
         const ctx = app.createAnonymousContext();
-        const res = await ctx.service.grab.login(data.phone, data.password);
+        const res = await ctx.service.grab.login(data);
+        await ctx.service.grab.sleep(100);
         const grabList = await ctx.service.grab.grabStatus(data);
-        console.log('grabList', grabList);
-        if (grabList.length === 0) {
-          await ctx.service.grab.GrabLogin(data);
-          const submitRes = await ctx.service.grab.GrabSubmit(data);
-          console.log(submitRes);
-          app.logger.info('处理成功', data);
-          app.messenger.sendToAgent('DONE', process.pid);
-        } else {
-          // 有订单就不再处理
-          await ctx.service.account.updateGrab(data, grabList);
-          app.logger.info('处理成功', data);
+        await ctx.service.grab.sleep(100);
+        app.logger.info('处理成功', data);
+        app.messenger.sendToAgent('DONE', process.pid);
 
-          app.messenger.sendToAgent('DONE', process.pid);
-        }
 
       } catch (e) {
-        app.logger.info('处理失败', data, e);
+        app.logger.info('处理失败', data, e.message);
         app.messenger.sendToAgent('DONE', process.pid);
       }
     });

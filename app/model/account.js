@@ -10,6 +10,7 @@ module.exports = app => {
     orderStatus: STRING,
     createTime: STRING,
     sid: STRING,
+    memberid: STRING,
     uid: INTEGER,
     cookie: STRING,
     created_at: DATE,

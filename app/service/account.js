@@ -13,6 +13,7 @@ class AccountService extends Service {
 
   async updateGrab(account, grabData) {
     await this.ctx.model.Account.update({
+      grabNumber: grabData[0].goodsNum,
       createTime: grabData[0].createTime,
       orderId: grabData[0].orderId,
       orderStatus: grabData[0].orderStatus,
